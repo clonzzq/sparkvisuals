@@ -1,5 +1,4 @@
-
-name: Build SparkVisuals APK
+ name: Build SparkVisuals APK
 
 on:
   workflow_dispatch:
@@ -12,30 +11,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: platform-tools
+        uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
         run: |
-          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-      - name: Extract project ZIP
+      - name: Find ZIP archive
+        id: findzip
         shell: bash
         run: |
           set -euo pipefail
@@ -43,32 +39,44 @@ jobs:
           ZIP=$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)
 
           if [ -z "$ZIP" ]; then
-            echo "ERROR: ZIP archive not found in repository root."
+            echo "ERROR: No ZIP archive found in repository root."
             exit 1
           fi
 
-          mkdir -p project
-          unzip -q "$ZIP" -d project
+          echo "archive=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "Found archive: $ZIP"
 
-      - name: Find and build Android project
+      - name: Extract project
+        run: |
+          set -euo pipefail
+          mkdir -p project
+          unzip -q "${{ steps.findzip.outputs.archive }}" -d project
+
+      - name: Locate Android project
+        id: project
         shell: bash
         run: |
           set -euo pipefail
 
-          SETTINGS=$(find project -type f \( \
-            -name settings.gradle \
-            -o -name settings.gradle.kts \
-          \) -print -quit)
+          SETTINGS=$(find project -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print -quit)
 
           if [ -z "$SETTINGS" ]; then
-            echo "ERROR: settings.gradle or settings.gradle.kts not found."
+            echo "ERROR: Android Gradle project not found in ZIP."
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS")
-          cd "$PROJECT_DIR"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Project directory: $PROJECT_DIR"
 
-          echo "Building project in: $PROJECT_DIR"
+      - name: Build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "${{ steps.project.outputs.dir }}"
 
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
@@ -77,7 +85,7 @@ jobs:
             gradle --no-daemon assembleDebug
           fi
 
-      - name: Prepare APK
+      - name: Find APK
         shell: bash
         run: |
           set -euo pipefail
@@ -87,11 +95,13 @@ jobs:
             -print -quit)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
+            echo "ERROR: APK file was not generated."
             exit 1
           fi
 
           cp "$APK" "$GITHUB_WORKSPACE/SparkVisuals-debug.apk"
+
+          echo "APK successfully prepared:"
           ls -lh "$GITHUB_WORKSPACE/SparkVisuals-debug.apk"
 
       - name: Upload APK
@@ -101,4 +111,3 @@ jobs:
           path: SparkVisuals-debug.apk
           if-no-files-found: error
           retention-days: 7
-concurrency: 
